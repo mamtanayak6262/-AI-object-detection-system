@@ -1,0 +1,339 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI Object Detection System</title>
+
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3/dist/coco-ssd.min.js"></script>
+
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{
+  font-family:Arial,sans-serif;
+  background:#071426;color:white;
+}
+header{
+  padding:22px;text-align:center;
+  background:linear-gradient(120deg,#0756c9,#00bcd4);
+}
+header h1{font-size:28px}
+header p{margin-top:8px}
+.container{max-width:1100px;margin:auto;padding:20px}
+.status{
+  background:#102943;padding:15px;
+  border-radius:12px;margin-bottom:18px;
+}
+.dot{
+  display:inline-block;width:10px;height:10px;
+  background:#ffbf00;border-radius:50%;margin-right:8px;
+}
+.layout{
+  display:grid;grid-template-columns:2fr 1fr;gap:18px;
+}
+.panel{
+  background:#10243b;padding:18px;
+  border-radius:16px;
+  border:1px solid #25415e;
+}
+.screen{
+  position:relative;background:#000;
+  border-radius:12px;overflow:hidden;
+  width:100%;min-height:260px;
+}
+video{
+  width:100%;display:block;
+  transform:scaleX(-1);
+}
+canvas{
+  position:absolute;top:0;left:0;
+  width:100%;height:100%;
+  pointer-events:none;
+}
+.placeholder{
+  min-height:300px;display:flex;
+  justify-content:center;align-items:center;
+  color:#9bb5cf;text-align:center;
+}
+button,.upload{
+  background:#0879e8;color:white;
+  border:0;padding:12px 17px;
+  border-radius:9px;cursor:pointer;
+  margin:6px 3px;font-weight:bold;
+}
+button:hover,.upload:hover{background:#00a6c7}
+.stop{background:#d83d50}
+.controls{margin-top:15px}
+input[type=file]{display:none}
+.stats{
+  display:grid;grid-template-columns:1fr 1fr;
+  gap:10px;margin-top:15px;
+}
+.stat{
+  background:#183754;padding:15px;
+  border-radius:10px;
+}
+.stat strong{font-size:25px;color:#00d8ff}
+.stat p{font-size:13px;color:#b6cce0}
+.results{margin-top:15px}
+.result{
+  background:#183754;padding:12px;
+  margin:8px 0;border-radius:9px;
+  display:flex;justify-content:space-between;
+}
+h3{margin-bottom:12px}
+.footer{text-align:center;padding:25px;color:#9bb5cf}
+@media(max-width:750px){
+ .layout{grid-template-columns:1fr}
+ header h1{font-size:23px}
+}
+</style>
+</head>
+
+<body>
+
+<header>
+<h1>🤖 AI Object Detection</h1>
+<p>Smart Real-Time Object Detection System</p>
+</header>
+
+<div class="container">
+
+<div class="status">
+<span class="dot" id="dot"></span>
+<span id="status">Loading AI Model...</span>
+</div>
+
+<div class="layout">
+
+<div class="panel">
+<h3>📷 Camera / Image Detection</h3>
+
+<div class="screen" id="screen">
+<div class="placeholder" id="placeholder">
+<div>
+<h2>AI CAMERA</h2>
+<p>Start camera or upload an image</p>
+</div>
+</div>
+<video id="video" autoplay muted playsinline hidden></video>
+<img id="photo" hidden style="width:100%;display:block">
+<canvas id="canvas"></canvas>
+</div>
+
+<div class="controls">
+<button onclick="startCamera()">▶ Start Camera</button>
+<button class="stop" onclick="stopCamera()">■ Stop</button>
+<label class="upload" for="imageInput">📁 Upload Image</label>
+<input type="file" id="imageInput" accept="image/*">
+<button onclick="detectImage()">🔍 Detect Image</button>
+</div>
+</div>
+
+<div class="panel">
+<h3>📊 Detection Dashboard</h3>
+
+<div class="stats">
+<div class="stat">
+<strong id="total">0</strong>
+<p>Objects Found</p>
+</div>
+<div class="stat">
+<strong id="types">0</strong>
+<p>Object Types</p>
+</div>
+</div>
+
+<div class="results">
+<h3 style="margin-top:20px">Detected Objects</h3>
+<div id="results">
+<p style="color:#9bb5cf">No objects detected yet.</p>
+</div>
+</div>
+</div>
+
+</div>
+</div>
+
+<div class="footer">
+AI Object Detection System | Powered by TensorFlow.js
+</div>
+
+<script>
+const video=document.getElementById("video");
+const photo=document.getElementById("photo");
+const canvas=document.getElementById("canvas");
+const ctx=canvas.getContext("2d");
+const statusText=document.getElementById("status");
+const placeholder=document.getElementById("placeholder");
+
+let model=null;
+let stream=null;
+let running=false;
+let selectedImage=false;
+let busy=false;
+
+async function loadModel(){
+ try{
+  await tf.ready();
+  model=await cocoSsd.load();
+  statusText.textContent="AI Model Ready ✓";
+  document.getElementById("dot").style.background="#00e676";
+ }catch(e){
+  statusText.textContent="Model loading failed. Check internet.";
+  console.error(e);
+ }
+}
+loadModel();
+
+async function startCamera(){
+ if(!model){
+  alert("Please wait. AI model is loading.");
+  return;
+ }
+ try{
+  stopCamera();
+  selectedImage=false;
+  photo.hidden=true;
+  video.hidden=false;
+  placeholder.hidden=true;
+
+  stream=await navigator.mediaDevices.getUserMedia({
+   video:{facingMode:"environment"},
+   audio:false
+  });
+
+  video.srcObject=stream;
+  await video.play();
+  running=true;
+  statusText.textContent="Camera Running - AI Detecting";
+  detectLoop();
+ }catch(e){
+  alert("Camera access nahi mila. HTTPS ya localhost par open karein aur permission allow karein.");
+  statusText.textContent="Camera unavailable";
+ }
+}
+
+function stopCamera(){
+ running=false;
+ if(stream){
+  stream.getTracks().forEach(t=>t.stop());
+  stream=null;
+ }
+ video.srcObject=null;
+ video.hidden=true;
+ canvas.width=0;
+ canvas.height=0;
+ ctx.clearRect(0,0,canvas.width,canvas.height);
+ if(!selectedImage){
+  placeholder.hidden=false;
+  statusText.textContent=model?"AI Model Ready":"Loading AI Model...";
+ }
+}
+
+async function detectLoop(){
+ if(!running)return;
+ if(video.readyState>=2 && !busy){
+  busy=true;
+  try{
+   const predictions=await model.detect(video);
+   drawBoxes(predictions,video.videoWidth,video.videoHeight,true);
+   showResults(predictions);
+  }catch(e){console.error(e)}
+  busy=false;
+ }
+ if(running) requestAnimationFrame(detectLoop);
+}
+
+function drawBoxes(predictions,w,h,mirror=false){
+ if(!w||!h)return;
+ canvas.width=w;
+ canvas.height=h;
+ ctx.clearRect(0,0,w,h);
+
+ if(mirror){
+  ctx.save();
+  ctx.translate(w,0);
+  ctx.scale(-1,1);
+ }
+
+ predictions.forEach(p=>{
+  const [x,y,bw,bh]=p.bbox;
+  ctx.strokeStyle="#00f0ff";
+  ctx.lineWidth=Math.max(2,w/400);
+  ctx.strokeRect(x,y,bw,bh);
+
+  const label=p.class+" "+Math.round(p.score*100)+"%";
+  ctx.font="bold 16px Arial";
+  const tw=ctx.measureText(label).width;
+  ctx.fillStyle="#007bff";
+  ctx.fillRect(x,y-25,tw+12,25);
+  ctx.fillStyle="white";
+  ctx.fillText(label,x+6,y-7);
+ });
+
+ if(mirror)ctx.restore();
+}
+
+function showResults(predictions){
+ document.getElementById("total").textContent=predictions.length;
+ const unique=[...new Set(predictions.map(p=>p.class))];
+ document.getElementById("types").textContent=unique.length;
+
+ const results=document.getElementById("results");
+ if(!predictions.length){
+  results.innerHTML="<p style='color:#9bb5cf'>No objects found.</p>";
+  return;
+ }
+ results.innerHTML=predictions.map(p=>`
+  <div class="result">
+   <span>🔹 ${p.class}</span>
+   <strong>${Math.round(p.score*100)}%</strong>
+  </div>
+ `).join("");
+}
+
+document.getElementById("imageInput").addEventListener("change",e=>{
+ const file=e.target.files[0];
+ if(!file)return;
+ if(!file.type.startsWith("image/"))return;
+
+ stopCamera();
+ selectedImage=true;
+ photo.onload=()=>{
+  photo.hidden=false;
+  placeholder.hidden=true;
+  statusText.textContent="Image ready - Click Detect Image";
+  canvas.width=photo.naturalWidth;
+  canvas.height=photo.naturalHeight;
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+ };
+ photo.src=URL.createObjectURL(file);
+});
+
+async function detectImage(){
+ if(!model){
+  alert("AI model is loading...");
+  return;
+ }
+ if(!selectedImage||!photo.src){
+  alert("Please upload an image first.");
+  return;
+ }
+ statusText.textContent="Detecting objects...";
+ try{
+  const predictions=await model.detect(photo);
+  drawBoxes(predictions,photo.naturalWidth,photo.naturalHeight);
+  showResults(predictions);
+  statusText.textContent="Image Detection Complete ✓";
+ }catch(e){
+  statusText.textContent="Detection failed";
+  console.error(e);
+ }
+}
+</script>
+
+</body>
+</html>
